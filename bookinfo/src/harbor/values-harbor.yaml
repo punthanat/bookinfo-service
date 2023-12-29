@@ -1,0 +1,33 @@
+expose:
+  type: clusterIP
+  tls:
+    enabled: false
+externalURL: https://harbor.banjo.opsta.in.th
+
+
+
+
+
+
+# persistence:
+#   enabled: true
+# prometheusExporter:
+#   enabled: true
+#   config:
+#     rules:
+#       - pattern: ".*"
+# deploymentType: Deployment
+# service:
+#   internalPort: 9000
+#   externalPort: 9000
+# startupProbe:
+#   initialDelaySeconds: 330
+#   timeoutSeconds: 300
+# readinessProbe:
+#   initialDelaySeconds: 230
+# # initContainers:
+# #   securityContext: "true"
+# # initSysctl:
+# #   securityContext: {privileged: true}
+# podLabels: {gke-banjo-cluster-pool-2-cfa12ac9-grp}
+

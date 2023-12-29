@@ -1,0 +1,24 @@
+ratings:
+  namespace: bookinfo-dev
+  image: harbor.banjo.opsta.in.th/bootcamp/ratings
+  tag: dev
+  replicas: 1
+  imagePullSecrets: registry-bookinfo
+  port: 8080
+  healthCheckPath: "/health"
+  mongodbPasswordExistingSecret: bookinfo-dev-ratings-mongodb-secret
+ingress:
+  host: ilikeyou.banjo.opsta.in.th
+  path: "/ratings(/|$)(.*)"
+  serviceType: ClusterIP
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  
+extraEnv:
+  SERVICE_VERSION: v2
+  MONGO_DB_URL: mongodb://bookinfo-dev-ratings-mongodb:27017/?authSource=ratings-dev
+  MONGO_DB_NAME: ratings-dev
+  MONGO_DB_USERNAME: ratings-dev
+  COMMIT_ID: CHANGME

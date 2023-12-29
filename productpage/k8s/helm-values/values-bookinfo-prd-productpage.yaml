@@ -1,0 +1,23 @@
+productpage:
+  namespace: productpage-prd
+  image: harbor.banjo.opsta.in.th/bootcamp/productpage
+  tag: prd
+  replicas: 1
+  imagePullSecrets: registry-bookinfo
+  port: 9080
+  healthCheckPath: "/health"
+
+ingress:
+  host: productpageprd.banjo.opsta.in.th
+  path: "/?(.*)"
+  serviceType: ClusterIP
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+extraEnv:
+  COMMIT_ID: CHANGME
+  DETAILS_HOSTNAME: "https://detailsprd.banjo.opsta.in.th/details"
+  RATINGS_HOSTNAME: "https://iveryloveyou.banjo.opsta.in.th/ratings"
+  REVIEWS_HOSTNAME: "https://reviewsprd.banjo.opsta.in.th/reviews"

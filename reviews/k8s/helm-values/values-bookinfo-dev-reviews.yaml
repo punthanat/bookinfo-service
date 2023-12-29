@@ -1,0 +1,22 @@
+reviews:
+  namespace: reviews-dev
+  image: harbor.banjo.opsta.in.th/bootcamp/reviews
+  tag: dev
+  replicas: 1
+  imagePullSecrets: registry-bookinfo
+  port: 9080
+  healthCheckPath: "/health"
+
+ingress:
+  host: reviewsdev.banjo.opsta.in.th
+  path: "/reviews(/|$)(.*)"
+  serviceType: ClusterIP
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+extraEnv:
+  ENABLE_RATINGS: True
+  RATINGS_SERVICE: https://ilikeyou.banjo.opsta.in.th/ratings
+  COMMIT_ID: CHANGME

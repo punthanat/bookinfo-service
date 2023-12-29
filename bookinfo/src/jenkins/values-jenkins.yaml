@@ -1,0 +1,11 @@
+jenkins:
+  namespace: jenkins
+  port: 8080
+ingress:
+  host: jenkins.banjo.opsta.in.th
+  path: "/?(.*)"
+  serviceType: ClusterIP
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    cert-manager.io/cluster-issuer: letsencrypt-prod

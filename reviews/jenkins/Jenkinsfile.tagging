@@ -1,0 +1,78 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: docker
+    image: docker:20.10.3-dind
+    command:
+    - dockerd
+    - --host=unix:///var/run/docker.sock
+    - --host=tcp://0.0.0.0:2375
+    - --storage-driver=overlay2
+    tty: true
+    securityContext:
+        privileged: true
+  - name: git
+    image: alpine/git:v2.30.0
+    command:
+    - cat
+    tty: true
+"""
+        }
+    }
+
+
+    stages {
+        stage('Clone reviews soruce code') {
+            steps {
+                container('jnlp'){
+                    script{
+                        git branch: "main", 
+                            credentialsId: 'bootcamp-bookinfo-git-deploy-key',
+                            url: 'git@gitlab.com:punthanat1/reviews.git'
+                    }
+                }   
+            }
+        }
+        
+        stage('Tag Docker Image'){
+            steps{
+                container('docker'){
+                    script{
+                        docker.withRegistry('https://harbor.banjo.opsta.in.th','registry-bookinfo') {
+                            uatImage = docker.image("harbor.banjo.opsta.in.th/bootcamp/reviews:uat")
+                            uatImage.pull()
+                            uatImage.push("build-${BUILD_NUMBER}")                            
+                        }
+                        
+                    }
+                }
+            }
+        }
+
+        stage('Git tag'){
+            steps {
+                container('git'){
+                    script{
+                        sshagent(credentials: ['bootcamp-bookinfo-git-deploy-key']){
+                            sh """
+                              # Git tag first
+                              git tag build-${BUILD_NUMBER}
+                              # Push tag back to GitLab
+                              SSH_AUTH_SOCK=${SSH_AUTH_SOCK} \
+                                GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no" \
+                                git push --tags
+                              """
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+}
+

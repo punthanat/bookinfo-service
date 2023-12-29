@@ -1,0 +1,197 @@
+// Uses Declarative syntax to run commands inside a container.
+def scmVars
+
+pipeline {
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: docker
+    image: docker:24.0
+    command:
+    - dockerd
+    - --host=unix:///var/run/docker.sock
+    - --host=tcp://0.0.0.0:2375
+    - --storage-driver=overlay2
+    tty: true
+    securityContext:
+        privileged: true
+  - name: helm
+    image: lachlanevenson/k8s-helm:v3.5.0
+    command:
+    - cat
+    tty: true
+  - name: skan 
+    image: alcide/skan:v0.9.0-debug
+    command:
+    - cat
+    tty: true
+  - name: java-node
+    image: timbru31/java-node:17-jre
+    command:
+    - cat
+    tty: true
+  - name: gradle
+    image: gradle:jdk17
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - mountPath: /home/jenkins/dependency-check-data
+      name: dependency-check-data
+  - name: trivy
+    image: aquasec/trivy:0.43.1
+    command:
+    - cat
+    tty: true    
+
+  volumes:
+  - name: dependency-check-data
+    hostPath:
+        path: /tmp/dependency-check-data
+"""
+        }
+    }
+
+    environment{
+        ENV_NAME = "${BRANCH_NAME == "main" ? "uat" : "${BRANCH_NAME}"}"
+        SCANNER_HOME = tool 'sonarqube-scanner'
+        PROJECT_KEY = "bootcamp-bookinfo-reviews"
+        PROJECT_NAME = "bootcamp-bookinfo-reviews"
+        HARBOR_USERNAME = credentials('HARBOR_USERNAME')
+        HARBOR_PASSWORD = credentials('HARBOR_PASSWORD')
+    }
+
+    stages {
+        stage('Clone reviews soruce code') {
+            steps {
+                container('jnlp'){
+                    script{
+                        scmVars = git branch: "${BRANCH_NAME}", 
+                                  credentialsId: 'bootcamp-bookinfo-git-deploy-key',
+                                  url: 'git@gitlab.com:punthanat1/reviews.git'
+                    }
+                }   
+            }
+        }
+        
+        stage('sKan') {
+            steps {
+                container('helm'){
+                    script{
+                       sh "helm template -f k8s/helm-values/values-bookinfo-${ENV_NAME}-reviews.yaml \
+                                    --set extraEnv.COMMIT_ID=${scmVars.GIT_COMMIT} \
+                                    --namespace reviews-${ENV_NAME} bookinfo-${ENV_NAME}-reviews k8s/helm \
+                                    > k8s-manifest-deploy.yaml"
+                    }
+                }  
+                container('skan') {
+                    script {
+                        sh "/skan manifest -f k8s-manifest-deploy.yaml"
+                        archiveArtifacts artifacts: 'skan-result.html'
+                        sh "rm k8s-manifest-deploy.yaml"
+                    }
+                }
+            }
+        }
+        
+        stage('Sonarqube Scanner') {
+            steps {
+                container('java-node'){
+                    script{
+                        withSonarQubeEnv('sonarqube-bootcamp'){
+                            sh '''${SCANNER_HOME}/bin/sonar-scanner \
+                              -D sonar.projectKey=${PROJECT_KEY} \
+                              -D sonar.projectName=${PROJECT_NAME} \
+                              -D sonar.projectVersion=${BRANCH_NAME}-${BUILD_NUMBER} \
+                              -D sonar.java.binaries=/ \
+                              -D sonar.sources=./ 
+                              '''
+                        }
+
+                        timeout(time: 1, unit: 'MINUTES'){
+                            def qg = waitForQualityGate()
+                            if (qg.status != 'OK'){
+                                error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                            }
+                        }
+                    }
+                }   
+            }
+        }
+        
+        stage('OWASP Dependency Check') {
+            steps {
+                container('gradle'){
+                    script{
+                        sh '''gradle clean build'''
+
+                        dependencyCheck(
+                            additionalArguments: "--data /home/jenkins/dependency-check-data --enableExperimental --out dependency-check-report.xml",
+                            odcInstallation: "dependency-check"
+                        )
+
+                        archiveArtifacts artifacts: 'dependency-check-report.xml'
+
+                        dependencyCheckPublisher(
+                            pattern: 'dependency-check-report.xml'
+                        )   
+                       
+                        sh '''rm -rf ./.gradle'''                  
+                    }
+                }   
+            }
+        }
+
+
+        stage('Build reviews Docker Image and Push') {
+            steps {
+                container('docker') {
+                    script {
+                        docker.withRegistry('https://harbor.banjo.opsta.in.th','registry-bookinfo') {
+                            docker.build("harbor.banjo.opsta.in.th/bootcamp/reviews:${ENV_NAME}").push()
+                        }
+                    }
+                }
+            }
+        }
+        
+
+        stage('Trivy scan') {
+            steps {
+                container('trivy'){
+                script {
+                    sh """
+                    export TRIVY_USERNAME=${HARBOR_USERNAME}
+                    export TRIVY_PASSWORD=${HARBOR_PASSWORD}
+                    trivy image harbor.banjo.opsta.in.th/bootcamp/reviews:${ENV_NAME} -f json -o results.json
+                    """
+                    recordIssues(tools: [trivy(pattern: 'results.json')])
+                }   
+            }
+        }
+        }
+
+        stage('Deploy reviews with Helm Chart'){
+            steps {
+                container('helm'){
+                    script{
+                        withKubeConfig([credentialsId: 'gke-kubeconfig']){
+                            withCredentials([file(credentialsId: 'gks-key.json',variable: 'GOOGLE_APPLICATION_CREDENTIALS')]){
+                                sh "helm upgrade -f k8s/helm-values/values-bookinfo-${ENV_NAME}-reviews.yaml --wait \
+                                    --set extraEnv.COMMIT_ID=${scmVars.GIT_COMMIT} \
+                                    --namespace reviews-${ENV_NAME} bookinfo-${ENV_NAME}-reviews k8s/helm"
+                             }
+                       }
+                    }
+                }
+            }
+        }
+
+    }
+}
+
+

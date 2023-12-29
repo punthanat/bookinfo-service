@@ -1,0 +1,66 @@
+// Uses Declarative syntax to run commands inside a container.
+def scmVars
+
+pipeline {
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: helm
+    image: lachlanevenson/k8s-helm:v3.5.0
+    command:
+    - cat
+    tty: true
+"""
+        }
+    }
+
+    parameters {
+        gitParameter name: 'TAG',
+                     selectedValue: 'TOP',
+                     sortMode: 'DESCENDING_SMART',
+                     tagFilter: 'build-*',
+                     type: 'PT_TAG'
+    }
+
+    stages {
+        stage('Clone reviews soruce code') {
+            steps {
+                script{
+                    scmVars = checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "refs/tags/${params.TAG}"]],
+                        userRemoteConfigs: [[
+                            credentialsId: 'bootcamp-bookinfo-git-deploy-key',
+                            url: 'git@gitlab.com:punthanat1/reviews.git'
+                        ]]                        
+                    ])     
+                }   
+            }
+        }
+        
+  
+        stage('Deploy reviews with Helm Chart'){
+            steps {
+                container('helm'){
+                    script{
+                        withKubeConfig([credentialsId: 'gke-kubeconfig']){
+                            withCredentials([file(credentialsId: 'gks-key.json',variable: 'GOOGLE_APPLICATION_CREDENTIALS')]){
+                                sh "helm upgrade -f k8s/helm-values/values-bookinfo-prd-reviews.yaml --wait \
+                                    --set extraEnv.COMMIT_ID=${scmVars.GIT_COMMIT} \
+                                    --set reviews.tag=${params.TAG} \
+                                    --namespace reviews-prd bookinfo-prd-reviews k8s/helm"
+                             }
+                       }
+                    }
+                }
+            }
+        }
+
+    }
+}
+
+

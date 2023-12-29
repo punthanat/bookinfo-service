@@ -1,0 +1,8 @@
+services:
+  details:
+    build: .
+    image: punthanat01/details:dev
+    ports:
+      - "8080:8080"
+   
+      
